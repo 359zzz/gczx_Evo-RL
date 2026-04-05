@@ -191,6 +191,22 @@ def _piper_absolute_pose_to_action(robot: Any, absolute_pose: dict[str, float]) 
     return {key: float(value) for key, value in absolute_pose.items()}
 
 
+def _enable_uncalibrated_passthrough_for_zero_home_if_needed(robot: Any, mode: str) -> None:
+    if mode != "home":
+        return
+    if robot.is_calibrated:
+        return
+    if not getattr(robot.config, "require_calibration", True):
+        return
+
+    logging.warning(
+        "%s has no LeRobot calibration file. "
+        "`lerobot_piper_zero_home` will use absolute joint passthrough so saved zero poses can still be replayed.",
+        robot,
+    )
+    robot.config.require_calibration = False
+
+
 def _move_to_zero_pose(
     robot: Any,
     current_pose: dict[str, float],
@@ -226,6 +242,7 @@ def piper_zero_home(cfg: PiperZeroHomeConfig):
 
     pose_path = _resolve_zero_pose_path(cfg)
     robot = make_robot_from_config(cfg.robot)
+    _enable_uncalibrated_passthrough_for_zero_home_if_needed(robot, cfg.mode)
     include_gripper = bool(cfg.include_gripper and getattr(robot.config, "sync_gripper", True))
 
     robot.connect(calibrate=cfg.connect_calibrate)

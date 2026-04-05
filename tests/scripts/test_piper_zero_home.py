@@ -7,6 +7,7 @@ import draccus
 
 from lerobot.scripts.lerobot_piper_zero_home import (
     PiperZeroHomeConfig,
+    _enable_uncalibrated_passthrough_for_zero_home_if_needed,
     _load_zero_pose,
     _move_to_zero_pose,
     _piper_absolute_pose_to_action,
@@ -111,6 +112,17 @@ def test_piper_absolute_pose_to_action_uses_calibration_offsets():
         "joint_1.pos": 3.5,
         "joint_2.pos": -2.0,
     }
+
+
+def test_zero_home_enables_uncalibrated_passthrough_when_calibration_missing():
+    robot = SimpleNamespace(
+        is_calibrated=False,
+        config=SimpleNamespace(require_calibration=True),
+    )
+
+    _enable_uncalibrated_passthrough_for_zero_home_if_needed(robot, "home")
+
+    assert robot.config.require_calibration is False
 
 
 def test_move_to_zero_pose_interpolates_and_finishes_at_target():

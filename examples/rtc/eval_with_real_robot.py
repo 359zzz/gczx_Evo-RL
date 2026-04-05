@@ -63,6 +63,19 @@ Usage:
         --robot.cameras="{ gripper: {type: opencv, index_or_path: 0, width: 640, height: 480, fps: 30}, front: {type: opencv, index_or_path: 1, width: 640, height: 480, fps: 30}}" \
         --task="Move green small object into the purple platform" \
         --duration=120
+
+    # Run RTC with a Piper follower robot
+    uv run examples/rtc/eval_with_real_robot.py \
+        --policy.path=/path/to/your/checkpoint/pretrained_model \
+        --policy.device=cuda \
+        --rtc.enabled=true \
+        --rtc.execution_horizon=10 \
+        --rtc.max_guidance_weight=10.0 \
+        --rtc.prefix_attention_schedule=EXP \
+        --robot.type=piper_follower \
+        --robot.port=can0 \
+        --task="Pick and place the can" \
+        --duration=120
 """
 
 import logging
@@ -94,6 +107,7 @@ from lerobot.rl.process import ProcessSignalHandler
 from lerobot.robots import (  # noqa: F401
     Robot,
     RobotConfig,
+    piper_follower,
     bi_so_follower,
     koch_follower,
     so_follower,
@@ -435,6 +449,12 @@ def demo_cli(cfg: RTCDemoConfig):
 
     # Initialize logging
     init_logging()
+
+    # Keep the top-level device and policy device aligned so either CLI style works.
+    if cfg.device is None:
+        cfg.device = cfg.policy.device
+    if cfg.policy.device is None:
+        cfg.policy.device = cfg.device
 
     logger.info(f"Using device: {cfg.device}")
 

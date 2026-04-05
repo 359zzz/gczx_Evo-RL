@@ -253,7 +253,7 @@ class RTCEvaluator:
         logging.info(f"Loading dataset: {cfg.dataset.repo_id}")
 
         # Get dataset metadata to extract FPS
-        ds_meta = LeRobotDatasetMetadata(cfg.dataset.repo_id)
+        ds_meta = LeRobotDatasetMetadata(cfg.dataset.repo_id, root=cfg.dataset.root)
 
         # Calculate delta_timestamps from policy's delta_indices
         delta_timestamps = resolve_delta_timestamps(cfg.policy, ds_meta)
@@ -261,6 +261,7 @@ class RTCEvaluator:
         # Create dataset with calculated delta_timestamps
         self.dataset = LeRobotDataset(
             cfg.dataset.repo_id,
+            root=cfg.dataset.root,
             delta_timestamps=delta_timestamps,
         )
         logging.info(f"Dataset loaded: {len(self.dataset)} samples, {self.dataset.num_episodes} episodes")

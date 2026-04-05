@@ -895,6 +895,30 @@ def test_piper_follower_send_only_mode_skips_camera_connects_and_stays_connected
     assert camera.disconnect_calls == 0
 
 
+def test_piper_follower_send_only_mode_waits_for_enable(monkeypatch):
+    patch_fake_sdk(monkeypatch)
+
+    wait_calls = []
+
+    def fake_wait_enable(arm, timeout_s):
+        wait_calls.append((arm, timeout_s))
+        return True
+
+    monkeypatch.setattr(piper_follower_module, "wait_enable_piper", fake_wait_enable)
+
+    robot = make_robot_from_config(
+        PiperFollowerConfig(port="can3", sync_gripper=True, require_calibration=False)
+    )
+    robot.calibration = make_identity_calibration()
+    robot.set_teleop_send_only_mode(True)
+
+    robot.connect(calibrate=False)
+    try:
+        assert wait_calls == [(robot.arm, robot.config.enable_timeout_s)]
+    finally:
+        robot.disconnect()
+
+
 def test_bimanual_piper_send_only_mode_propagates_to_both_followers(monkeypatch):
     patch_fake_sdk(monkeypatch)
 

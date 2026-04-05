@@ -116,11 +116,8 @@ class PiperFollower(Robot):
             # Enable behavior should be controlled by enable_on_connect, independent from calibrate flag.
             # This keeps connect(calibrate=False) commandable for callers that only want to skip interactive calibration.
             should_enable = self.config.enable_on_connect
-            if should_enable:
-                if self._teleop_send_only_mode:
-                    self.arm.EnablePiper()
-                elif not self._wait_enable(self.config.enable_timeout_s):
-                    logger.warning("Piper follower did not report enabled state before timeout.")
+            if should_enable and not self._wait_enable(self.config.enable_timeout_s):
+                logger.warning("Piper follower did not report enabled state before timeout.")
 
             if not self._teleop_send_only_mode:
                 for cam in self.cameras.values():

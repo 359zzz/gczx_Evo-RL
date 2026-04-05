@@ -43,6 +43,16 @@ def _rpy_deg_to_rot(roll_deg: float, pitch_deg: float, yaw_deg: float) -> np.nda
     return rot_z @ rot_y @ rot_x
 
 
+def _get_urdf_package_dirs(urdf: Path) -> list[str]:
+    package_dir = urdf.parent.parent
+    asset_root = package_dir.parent
+    # `package://piper_description/...` needs the parent directory that contains
+    # the `piper_description` package folder. Keeping the package directory itself
+    # as a fallback also supports plain relative mesh references.
+    candidate_dirs = [asset_root, package_dir]
+    return list(dict.fromkeys(str(path) for path in candidate_dirs))
+
+
 class PiperGravityCompensationLoop:
     """Background MIT torque loop for gravity compensation on Piper leader arm."""
 
@@ -76,7 +86,7 @@ class PiperGravityCompensationLoop:
         if not urdf.is_file():
             raise FileNotFoundError(f"gravity compensation URDF does not exist: {urdf}")
 
-        package_dirs = [str(urdf.parent.parent)]
+        package_dirs = _get_urdf_package_dirs(urdf)
         self._robot = pin.RobotWrapper.BuildFromURDF(str(urdf), package_dirs)
         self._robot.data = self._robot.model.createData()
         self._nq = 6

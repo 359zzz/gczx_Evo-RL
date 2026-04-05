@@ -42,8 +42,6 @@ python -m lerobot.scripts.lerobot_piper_zero_home \
 ```
 """
 
-from __future__ import annotations
-
 import json
 import logging
 from dataclasses import dataclass

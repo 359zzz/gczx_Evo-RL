@@ -1,3 +1,4 @@
+import inspect
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -10,6 +11,7 @@ from lerobot.scripts.lerobot_piper_zero_home import (
     _move_to_zero_pose,
     _piper_absolute_pose_to_action,
     _save_zero_pose,
+    piper_zero_home,
 )
 
 
@@ -55,6 +57,11 @@ def test_piper_zero_home_parses_config():
     assert cfg.robot.port == "can0"
     assert cfg.duration_s == 4.0
     assert cfg.fps == 60
+
+
+def test_piper_zero_home_wrap_annotation_is_dataclass_type():
+    annotations = inspect.getfullargspec(piper_zero_home.__wrapped__).annotations
+    assert annotations["cfg"] is PiperZeroHomeConfig
 
 
 def test_save_and_load_zero_pose(tmp_path: Path):

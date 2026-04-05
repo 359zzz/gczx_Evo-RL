@@ -44,6 +44,7 @@ python -m lerobot.scripts.lerobot_piper_zero_home \
 
 import json
 import logging
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -73,6 +74,7 @@ class PiperZeroHomeConfig:
     duration_s: float = 3.0
     fps: int = 50
     settle_time_s: float = 0.2
+    observation_timeout_s: float = 1.0
     include_gripper: bool = True
     connect_calibrate: bool = False
 
@@ -109,6 +111,8 @@ def _validate_piper_zero_home_config(cfg: PiperZeroHomeConfig) -> None:
         raise ValueError("`fps` must be > 0.")
     if cfg.settle_time_s < 0:
         raise ValueError("`settle_time_s` must be >= 0.")
+    if cfg.observation_timeout_s < 0:
+        raise ValueError("`observation_timeout_s` must be >= 0.")
 
 
 def _extract_zero_pose_from_observation(observation: dict[str, Any], include_gripper: bool) -> dict[str, float]:
@@ -124,9 +128,54 @@ def _extract_zero_pose_from_observation(observation: dict[str, Any], include_gri
     return pose
 
 
-def _save_zero_pose(robot: Any, pose_path: Path, include_gripper: bool) -> dict[str, float]:
-    observation = robot.get_observation()
-    joint_pos = _extract_zero_pose_from_observation(observation, include_gripper=include_gripper)
+def _read_robot_zero_pose(
+    robot: Any,
+    *,
+    include_gripper: bool,
+    observation_timeout_s: float,
+    poll_s: float = 0.02,
+) -> dict[str, float]:
+    arm = getattr(robot, "arm", None)
+    if arm is None:
+        return _extract_zero_pose_from_observation(robot.get_observation(), include_gripper=include_gripper)
+
+    joint_deadline = time.monotonic() + max(0.0, observation_timeout_s)
+    while time.monotonic() < joint_deadline:
+        joint_ts = float(getattr(arm.GetArmJointMsgs(), "time_stamp", 0.0) or 0.0)
+        if joint_ts > 0:
+            break
+        time.sleep(max(0.001, poll_s))
+
+    if include_gripper:
+        gripper_deadline = time.monotonic() + max(0.0, observation_timeout_s)
+        while time.monotonic() < gripper_deadline:
+            gripper_ts = float(getattr(arm.GetArmGripperMsgs(), "time_stamp", 0.0) or 0.0)
+            if gripper_ts > 0:
+                break
+            time.sleep(max(0.001, poll_s))
+
+    pose = _extract_zero_pose_from_observation(robot.get_observation(), include_gripper=include_gripper)
+    if all(abs(value) < 1e-6 for value in pose.values()):
+        logging.warning(
+            "%s PiPER feedback still looks like all zeros after waiting %.2fs. "
+            "If the arm does not move as expected, recapture zero pose after feedback is stable.",
+            robot,
+            observation_timeout_s,
+        )
+    return pose
+
+
+def _save_zero_pose(
+    robot: Any,
+    pose_path: Path,
+    include_gripper: bool,
+    observation_timeout_s: float = 1.0,
+) -> dict[str, float]:
+    joint_pos = _read_robot_zero_pose(
+        robot,
+        include_gripper=include_gripper,
+        observation_timeout_s=observation_timeout_s,
+    )
 
     pose_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -235,6 +284,16 @@ def _move_to_zero_pose(
     sleep_fn(settle_time_s)
 
 
+def _log_pose_delta(current_pose: dict[str, float], target_pose: dict[str, float]) -> None:
+    shared_keys = [key for key in _active_pose_keys(include_gripper=True) if key in current_pose and key in target_pose]
+    if not shared_keys:
+        return
+    deltas = {key: target_pose[key] - current_pose[key] for key in shared_keys}
+    max_key = max(shared_keys, key=lambda key: abs(deltas[key]))
+    logging.info("PiPER zero-home max joint delta before motion: %s=%.3f", max_key, deltas[max_key])
+    logging.debug("Full PiPER zero-home deltas: %s", deltas)
+
+
 @parser.wrap()
 def piper_zero_home(cfg: PiperZeroHomeConfig):
     init_logging()
@@ -248,7 +307,12 @@ def piper_zero_home(cfg: PiperZeroHomeConfig):
     robot.connect(calibrate=cfg.connect_calibrate)
     try:
         if cfg.mode == "capture":
-            pose = _save_zero_pose(robot=robot, pose_path=pose_path, include_gripper=include_gripper)
+            pose = _save_zero_pose(
+                robot=robot,
+                pose_path=pose_path,
+                include_gripper=include_gripper,
+                observation_timeout_s=cfg.observation_timeout_s,
+            )
             logging.info("Captured custom zero pose: %s", pose)
             return pose
 
@@ -262,7 +326,12 @@ def piper_zero_home(cfg: PiperZeroHomeConfig):
         if not include_gripper:
             target_pose = {key: value for key, value in target_pose.items() if key != "gripper.pos"}
 
-        current_pose = _extract_zero_pose_from_observation(robot.get_observation(), include_gripper=include_gripper)
+        current_pose = _read_robot_zero_pose(
+            robot,
+            include_gripper=include_gripper,
+            observation_timeout_s=cfg.observation_timeout_s,
+        )
+        _log_pose_delta(current_pose=current_pose, target_pose=target_pose)
         _move_to_zero_pose(
             robot=robot,
             current_pose=current_pose,

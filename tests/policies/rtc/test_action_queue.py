@@ -319,6 +319,27 @@ def test_merge_resets_last_index_when_rtc_enabled(action_queue_rtc_enabled, samp
     assert action_queue_rtc_enabled.last_index == 0
 
 
+def test_merge_preserves_current_rtc_prefix_and_appends_new_tail():
+    """RTC merge should keep in-flight actions and only append future tail from the new chunk."""
+    queue = ActionQueue(RTCConfig(enabled=True, execution_horizon=10, queue_blend_steps=0))
+
+    old_actions = torch.arange(10, dtype=torch.float32).unsqueeze(-1)
+    new_actions = torch.arange(100, 112, dtype=torch.float32).unsqueeze(-1)
+
+    queue.merge(old_actions, old_actions, real_delay=0)
+
+    for _ in range(4):
+        queue.get()
+
+    queue.merge(new_actions, new_actions, real_delay=0)
+
+    merged = []
+    while not queue.empty():
+        merged.append(queue.get().item())
+
+    assert merged == [4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 106.0, 107.0, 108.0, 109.0, 110.0, 111.0]
+
+
 def test_merge_with_zero_delay(action_queue_rtc_enabled, sample_actions):
     """Test merge() with zero delay keeps all actions."""
     action_queue_rtc_enabled.merge(sample_actions["original"], sample_actions["processed"], real_delay=0)

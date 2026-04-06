@@ -158,20 +158,106 @@ class ActionQueue:
 
         Discards the first `real_delay` actions since they correspond to the time
         spent during inference, when the robot was executing previous actions.
+        The remaining old queue and the newly predicted queue are aligned by
+        future timestep before merging. This keeps in-flight actions stable and
+        avoids overwriting the current chunk with misaligned early actions from
+        the new prediction.
 
         Args:
             original_actions: Unprocessed actions from policy.
             processed_actions: Post-processed actions for robot.
             real_delay: Number of time steps to skip due to inference delay.
         """
-        self.original_queue = original_actions[real_delay:].clone()
-        self.queue = processed_actions[real_delay:].clone()
+        new_original = original_actions[real_delay:].clone()
+        new_processed = processed_actions[real_delay:].clone()
+
+        if self.queue is None or self.original_queue is None:
+            self.original_queue = new_original
+            self.queue = new_processed
+            self.last_index = 0
+            return
+
+        old_original_remaining = self.original_queue[self.last_index :].clone()
+        old_processed_remaining = self.queue[self.last_index :].clone()
+
+        overlap_steps = min(
+            len(old_original_remaining),
+            len(old_processed_remaining),
+            len(new_original),
+            len(new_processed),
+        )
+        blend_steps = min(self.cfg.queue_blend_steps, overlap_steps)
+
+        merged_original_parts: list[Tensor] = []
+        merged_processed_parts: list[Tensor] = []
+
+        aligned_prefix_len = max(overlap_steps - blend_steps, 0)
+        if aligned_prefix_len > 0:
+            merged_original_parts.append(old_original_remaining[:aligned_prefix_len])
+            merged_processed_parts.append(old_processed_remaining[:aligned_prefix_len])
+
+        if blend_steps > 0:
+            overlap_start = overlap_steps - blend_steps
+            blended_original = self._blend_overlap(
+                old_original_remaining[overlap_start:overlap_steps],
+                new_original[overlap_start:overlap_steps],
+            )
+            blended_processed = self._blend_overlap(
+                old_processed_remaining[overlap_start:overlap_steps],
+                new_processed[overlap_start:overlap_steps],
+            )
+            merged_original_parts.append(blended_original)
+            merged_processed_parts.append(blended_processed)
+        elif overlap_steps > 0:
+            merged_original_parts.append(old_original_remaining[:overlap_steps])
+            merged_processed_parts.append(old_processed_remaining[:overlap_steps])
+
+        if len(old_original_remaining) > overlap_steps:
+            merged_original_parts.append(old_original_remaining[overlap_steps:])
+            merged_processed_parts.append(old_processed_remaining[overlap_steps:])
+
+        if len(new_original) > overlap_steps:
+            merged_original_parts.append(new_original[overlap_steps:])
+            merged_processed_parts.append(new_processed[overlap_steps:])
+
+        if merged_original_parts:
+            self.original_queue = torch.cat(merged_original_parts, dim=0)
+            self.queue = torch.cat(merged_processed_parts, dim=0)
+        else:
+            self.original_queue = new_original
+            self.queue = new_processed
+
+        logger.debug(
+            "Merged RTC queue with aligned overlap (overlap=%s, blend=%s, old_remaining=%s, new_remaining=%s)",
+            overlap_steps,
+            blend_steps,
+            len(old_processed_remaining),
+            len(new_processed),
+        )
 
         logger.debug(f"original_actions shape: {self.original_queue.shape}")
         logger.debug(f"processed_actions shape: {self.queue.shape}")
         logger.debug(f"real_delay: {real_delay}")
 
         self.last_index = 0
+
+    def _blend_overlap(self, old_actions: Tensor, new_actions: Tensor) -> Tensor:
+        """Linearly crossfade old queued actions into new actions."""
+        if len(old_actions) != len(new_actions):
+            raise ValueError("old_actions and new_actions must have the same overlap length")
+        if len(old_actions) == 0:
+            return new_actions
+        if len(old_actions) == 1:
+            return 0.5 * old_actions + 0.5 * new_actions
+
+        blend = torch.linspace(
+            0.0,
+            1.0,
+            steps=len(old_actions),
+            device=old_actions.device,
+            dtype=old_actions.dtype,
+        ).unsqueeze(-1)
+        return old_actions * (1.0 - blend) + new_actions * blend
 
     def _append_actions_queue(self, original_actions: Tensor, processed_actions: Tensor):
         """Append new actions to the queue (non-RTC mode).

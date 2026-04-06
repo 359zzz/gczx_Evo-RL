@@ -145,12 +145,12 @@ class ActionQueue:
             action_index_before_inference: Index before inference started, for validation.
         """
         with self.lock:
-            self._check_delays(real_delay, action_index_before_inference)
-
             if self.cfg.enabled:
-                self._replace_actions_queue(original_actions, processed_actions, real_delay)
+                effective_delay = self._resolve_rtc_delay(real_delay, action_index_before_inference)
+                self._replace_actions_queue(original_actions, processed_actions, effective_delay)
                 return
 
+            self._check_delays(real_delay, action_index_before_inference)
             self._append_actions_queue(original_actions, processed_actions)
 
     def _replace_actions_queue(self, original_actions: Tensor, processed_actions: Tensor, real_delay: int):
@@ -303,3 +303,26 @@ class ActionQueue:
                 f"[ACTION_QUEUE] Indexes diff is not equal to real delay. "
                 f"Indexes diff: {indexes_diff}, real delay: {real_delay}"
             )
+
+    def _resolve_rtc_delay(self, real_delay: int, action_index_before_inference: int | None) -> int:
+        """Resolve the effective delay used for RTC queue alignment.
+
+        In RTC mode, the queue alignment should follow the number of actions that
+        were actually consumed while inference was running. The latency-derived
+        estimate is kept only as a fallback when the actual consumption count is
+        unavailable.
+        """
+        if action_index_before_inference is None:
+            return max(real_delay, 0)
+
+        indexes_diff = self.last_index - action_index_before_inference
+        effective_delay = max(indexes_diff, 0)
+
+        if indexes_diff != real_delay:
+            logger.warning(
+                f"[ACTION_QUEUE] Indexes diff is not equal to real delay. "
+                f"Indexes diff: {indexes_diff}, real delay: {real_delay}. "
+                f"Using indexes diff for RTC queue alignment."
+            )
+
+        return effective_delay

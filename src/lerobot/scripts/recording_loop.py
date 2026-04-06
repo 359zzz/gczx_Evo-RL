@@ -303,13 +303,18 @@ def record_loop(
             )
             act_processed_policy = make_robot_action(policy_action, dataset.features)
 
-        if isinstance(teleop, Teleoperator):
+        should_read_teleop = teleop is not None and (
+            not intervention_enabled or intervention_state == INTERVENTION_STATE_ACTIVE or policy is None
+        )
+        if isinstance(teleop, Teleoperator) and should_read_teleop:
             act = run_with_connection_retry("teleop.get_action", teleop.get_action)
 
-            # Applies a pipeline to the raw teleop action, default is IdentityProcessor
+            # Only poll the leader arm when teleop can actually drive execution.
+            # In policy-sync mode this avoids an extra teleop CAN read on every step until
+            # intervention is explicitly enabled.
             act_processed_teleop = teleop_action_processor((act, obs))
 
-        elif isinstance(teleop, list):
+        elif isinstance(teleop, list) and should_read_teleop:
             arm_action = run_with_connection_retry("teleop_arm.get_action", teleop_arm.get_action)
             arm_action = {f"arm_{k}": v for k, v in arm_action.items()}
             keyboard_action = teleop_keyboard.get_action()

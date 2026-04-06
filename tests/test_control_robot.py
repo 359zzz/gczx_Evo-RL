@@ -285,6 +285,87 @@ def test_record_loop_sets_leader_manual_control_during_reset():
     assert teleop.manual_control_calls == [True]
 
 
+def test_record_loop_skips_teleop_polling_until_intervention(tmp_path):
+    class _StaticPolicy:
+        def __init__(self):
+            self.config = type("Config", (), {"device": "cpu", "use_amp": False})()
+            self.reset_calls = 0
+
+        def reset(self):
+            self.reset_calls += 1
+
+        def select_action(self, batch):
+            return torch.tensor([[1.0, 2.0, 3.0]], dtype=torch.float32)
+
+    robot = MockRobot(MockRobotConfig(n_motors=3, random_values=False, static_values=[0.0, 0.0, 0.0]))
+    teleop = MockTeleop(MockTeleopConfig(n_motors=3, random_values=False, static_values=[5.0, 6.0, 7.0]))
+    policy = _StaticPolicy()
+    dataset = LeRobotDataset.create(
+        repo_id=DUMMY_REPO_ID,
+        fps=30,
+        root=tmp_path / "policy_sync_no_teleop_poll",
+        robot_type=robot.name,
+        use_videos=False,
+        features={
+            "action": {
+                "dtype": "float32",
+                "shape": (len(robot.action_features),),
+                "names": list(robot.action_features),
+            },
+            "observation.state": {
+                "dtype": "float32",
+                "shape": (len(robot.observation_features),),
+                "names": list(robot.observation_features),
+            },
+        },
+    )
+    policy_sync_executor = PolicySyncDualArmExecutor(robot=robot, teleop=teleop, parallel_dispatch=False)
+
+    robot.connect()
+    teleop.connect()
+    robot.send_action = MagicMock(wraps=robot.send_action)
+    teleop.get_action = MagicMock(
+        return_value={f"motor_{idx + 1}.pos": float(idx + 1) for idx in range(len(robot.action_features))}
+    )
+    teleop.send_feedback = MagicMock()
+    try:
+        record_loop(
+            robot=robot,
+            events={
+                "exit_early": False,
+                "rerecord_episode": False,
+                "stop_recording": False,
+                "toggle_intervention": False,
+                "episode_outcome": None,
+            },
+            fps=30,
+            teleop_action_processor=lambda x: x[0],
+            robot_action_processor=lambda x: x[0],
+            robot_observation_processor=lambda x: x,
+            dataset=dataset,
+            teleop=teleop,
+            policy=policy,
+            preprocessor=lambda x: x,
+            postprocessor=lambda x: x,
+            control_time_s=0.05,
+            single_task="Dummy task",
+            policy_sync_executor=policy_sync_executor,
+            intervention_state_machine_enabled=True,
+            communication_retry_timeout_s=0.0,
+        )
+    finally:
+        policy_sync_executor.shutdown()
+        if teleop.is_connected:
+            teleop.disconnect()
+        if robot.is_connected:
+            robot.disconnect()
+
+    teleop.get_action.assert_not_called()
+    teleop.send_feedback.assert_called()
+    robot.send_action.assert_called()
+    assert policy.reset_calls == 1
+
+
 def test_save_and_load_failure_reset_pose(tmp_path):
     robot = MockRobot(MockRobotConfig(n_motors=2, random_values=False, static_values=[12.5, -3.0]))
     robot.connect()

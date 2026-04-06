@@ -43,6 +43,7 @@ class RTCConfig:
     max_guidance_weight: float = 10.0
     execution_horizon: int = 10
     queue_blend_steps: int = 0
+    startup_skip_replacements: int = 0
 
     # Debug settings
     debug: bool = False
@@ -54,5 +55,9 @@ class RTCConfig:
             raise ValueError(f"max_guidance_weight must be positive, got {self.max_guidance_weight}")
         if self.queue_blend_steps < 0:
             raise ValueError(f"queue_blend_steps must be >= 0, got {self.queue_blend_steps}")
+        if self.startup_skip_replacements < 0:
+            raise ValueError(
+                f"startup_skip_replacements must be >= 0, got {self.startup_skip_replacements}"
+            )
         if self.debug_maxlen <= 0:
             raise ValueError(f"debug_maxlen must be positive, got {self.debug_maxlen}")

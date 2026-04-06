@@ -63,6 +63,7 @@ class ActionQueue:
         self.lock = Lock()
         self.last_index = 0
         self.cfg = cfg
+        self._rtc_startup_skips_done = 0
 
     def get(self) -> Tensor | None:
         """Get the next action from the queue.
@@ -146,6 +147,14 @@ class ActionQueue:
         """
         with self.lock:
             if self.cfg.enabled:
+                if self._should_skip_rtc_replacement():
+                    self._rtc_startup_skips_done += 1
+                    logger.info(
+                        "[ACTION_QUEUE] Skipping RTC replacement during startup (%s/%s)",
+                        self._rtc_startup_skips_done,
+                        self.cfg.startup_skip_replacements,
+                    )
+                    return
                 effective_delay = self._resolve_rtc_delay(real_delay, action_index_before_inference)
                 self._replace_actions_queue(original_actions, processed_actions, effective_delay)
                 return
@@ -303,6 +312,14 @@ class ActionQueue:
                 f"[ACTION_QUEUE] Indexes diff is not equal to real delay. "
                 f"Indexes diff: {indexes_diff}, real delay: {real_delay}"
             )
+
+    def _should_skip_rtc_replacement(self) -> bool:
+        """Whether to skip this RTC replacement during startup warmup."""
+        if self.queue is None or self.original_queue is None:
+            return False
+        if self.cfg.startup_skip_replacements <= 0:
+            return False
+        return self._rtc_startup_skips_done < self.cfg.startup_skip_replacements
 
     def _resolve_rtc_delay(self, real_delay: int, action_index_before_inference: int | None) -> int:
         """Resolve the effective delay used for RTC queue alignment.

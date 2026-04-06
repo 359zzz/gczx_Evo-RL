@@ -31,6 +31,7 @@ def test_rtc_config_default_initialization():
     assert config.max_guidance_weight == 10.0
     assert config.execution_horizon == 10
     assert config.queue_blend_steps == 0
+    assert config.startup_skip_replacements == 0
     assert config.debug is False
     assert config.debug_maxlen == 100
 
@@ -43,6 +44,7 @@ def test_rtc_config_custom_initialization():
         max_guidance_weight=5.0,
         execution_horizon=20,
         queue_blend_steps=6,
+        startup_skip_replacements=2,
         debug=True,
         debug_maxlen=200,
     )
@@ -52,6 +54,7 @@ def test_rtc_config_custom_initialization():
     assert config.max_guidance_weight == 5.0
     assert config.execution_horizon == 20
     assert config.queue_blend_steps == 6
+    assert config.startup_skip_replacements == 2
     assert config.debug is True
     assert config.debug_maxlen == 200
 
@@ -66,6 +69,7 @@ def test_rtc_config_partial_initialization():
     assert config.prefix_attention_schedule == RTCAttentionSchedule.LINEAR
     assert config.execution_horizon == 10
     assert config.queue_blend_steps == 0
+    assert config.startup_skip_replacements == 0
     assert config.debug is False
 
 
@@ -77,3 +81,13 @@ def test_rtc_config_rejects_negative_queue_blend_steps():
         assert "queue_blend_steps" in str(exc)
     else:
         raise AssertionError("Expected ValueError for negative queue_blend_steps")
+
+
+def test_rtc_config_rejects_negative_startup_skip_replacements():
+    """Test RTCConfig validates startup_skip_replacements."""
+    try:
+        RTCConfig(startup_skip_replacements=-1)
+    except ValueError as exc:
+        assert "startup_skip_replacements" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for negative startup_skip_replacements")

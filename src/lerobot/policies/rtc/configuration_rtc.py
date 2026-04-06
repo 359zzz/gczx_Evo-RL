@@ -44,6 +44,7 @@ class RTCConfig:
     execution_horizon: int = 10
     queue_blend_steps: int = 0
     startup_skip_replacements: int = 0
+    startup_wait_for_first_queue_drain: bool = False
 
     # Debug settings
     debug: bool = False

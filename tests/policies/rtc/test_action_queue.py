@@ -390,6 +390,35 @@ def test_merge_can_skip_startup_rtc_replacements():
     assert merged == [4.0, 5.0, 6.0, 7.0, 8.0, 9.0]
 
 
+def test_merge_waits_for_first_queue_drain_before_replacing():
+    """RTC can hold off replacements until the first queued chunk is fully consumed."""
+    queue = ActionQueue(
+        RTCConfig(enabled=True, execution_horizon=10, queue_blend_steps=0, startup_wait_for_first_queue_drain=True)
+    )
+
+    old_actions = torch.arange(10, dtype=torch.float32).unsqueeze(-1)
+    new_actions = torch.arange(100, 112, dtype=torch.float32).unsqueeze(-1)
+
+    queue.merge(old_actions, old_actions, real_delay=0)
+
+    for _ in range(4):
+        queue.get()
+
+    queue.merge(new_actions, new_actions, real_delay=0)
+    assert queue.qsize() == 6
+
+    for _ in range(6):
+        queue.get()
+
+    queue.merge(new_actions, new_actions, real_delay=0)
+
+    merged = []
+    while not queue.empty():
+        merged.append(queue.get().item())
+
+    assert merged == [100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0, 108.0, 109.0, 110.0, 111.0]
+
+
 def test_merge_with_zero_delay(action_queue_rtc_enabled, sample_actions):
     """Test merge() with zero delay keeps all actions."""
     action_queue_rtc_enabled.merge(sample_actions["original"], sample_actions["processed"], real_delay=0)

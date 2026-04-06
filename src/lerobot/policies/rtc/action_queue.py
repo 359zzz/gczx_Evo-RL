@@ -64,6 +64,7 @@ class ActionQueue:
         self.last_index = 0
         self.cfg = cfg
         self._rtc_startup_skips_done = 0
+        self._rtc_first_queue_drained = False
 
     def get(self) -> Tensor | None:
         """Get the next action from the queue.
@@ -78,6 +79,8 @@ class ActionQueue:
 
             action = self.queue[self.last_index]
             self.last_index += 1
+            if self.cfg.enabled and not self._rtc_first_queue_drained and self.last_index >= len(self.queue):
+                self._rtc_first_queue_drained = True
             return action.clone()
 
     def qsize(self) -> int:
@@ -147,6 +150,9 @@ class ActionQueue:
         """
         with self.lock:
             if self.cfg.enabled:
+                if self._should_wait_for_first_queue_drain():
+                    logger.info("[ACTION_QUEUE] Waiting for first RTC queue to drain before allowing replacements")
+                    return
                 if self._should_skip_rtc_replacement():
                     self._rtc_startup_skips_done += 1
                     logger.info(
@@ -320,6 +326,14 @@ class ActionQueue:
         if self.cfg.startup_skip_replacements <= 0:
             return False
         return self._rtc_startup_skips_done < self.cfg.startup_skip_replacements
+
+    def _should_wait_for_first_queue_drain(self) -> bool:
+        """Whether RTC replacements should wait until the first queued chunk is exhausted."""
+        if self.queue is None or self.original_queue is None:
+            return False
+        if not self.cfg.startup_wait_for_first_queue_drain:
+            return False
+        return not self._rtc_first_queue_drained
 
     def _resolve_rtc_delay(self, real_delay: int, action_index_before_inference: int | None) -> int:
         """Resolve the effective delay used for RTC queue alignment.
